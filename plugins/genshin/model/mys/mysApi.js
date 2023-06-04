@@ -153,6 +153,7 @@ export default class MysApi {
     return {
       'x-rpc-app_version': client.app_version,
       'x-rpc-client_type': client.client_type,
+      'x-rpc-device_fp': '38d7edaad494f',
       'User-Agent': client.User_Agent,
       Referer: client.Referer,
       DS: this.getDs(query, body)
