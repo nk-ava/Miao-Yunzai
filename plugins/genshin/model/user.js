@@ -344,7 +344,7 @@ export default class User extends base {
     await sequelize.query(`delete from UserGames where userId is null or data is null`, {})
     let games = await UserGameDB.findAll()
     let count = 0
-    await Data.asyncPool(20, games, async (game) => {
+    await Data.forEach(games, async (game) => {
       if (!game.userId) {
         game.destroy()
         return true
@@ -424,9 +424,15 @@ export default class User extends base {
       }
       await user.save()
       if (fs.existsSync(`./data/MysCookie/${qq}.yaml`)) {
-        fs.rename(`./data/MysCookie/${qq}.yaml`, `./temp/MysCookieBak/${qq}.yaml`, (err) => {
-          if (err) console.log(err)
-        })
+        try {
+          let src = `./data/MysCookie/${qq}.yaml`;
+          let dest = `./temp/MysCookieBak/${qq}.yaml`;
+          await fs.promises.unlink(dest).catch((_) => { });
+          await fs.promises.copyFile(src, dest);
+          await fs.promises.unlink(src);
+        } catch (err) {
+          console.log(err);
+        }
       }
       count++
     }
