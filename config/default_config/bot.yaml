@@ -22,4 +22,6 @@ online_msg: true
 # 上线推送通知的冷却时间
 online_msg_exp: 86400
 # geetest验证地址
-verifyHost: http://47.113.144.209
+verifyHost:
+# 包签名api
+sign_api_addr:
