@@ -2,6 +2,7 @@ import BaseModel from './BaseModel.js'
 import lodash from 'lodash'
 import { UserGameDB } from './index.js'
 import MysUtil from '../mys/MysUtil.js'
+import MysUserDB from './MysUserDB.js'
 
 const { Types } = BaseModel
 
@@ -76,12 +77,25 @@ class UserDB extends BaseModel {
       }
     })
     db.ltuids = ltuids.join(',')
-    db.games = user._games
+    let games = {}
+    lodash.forEach(user._games, (gameDs, game) => {
+      games[game] = {
+        uid: gameDs.uid,
+        data: {}
+      }
+      lodash.forEach(gameDs.data, (ds, uid) => {
+        games[game].data[uid] = {
+          uid: ds.uid,
+          type: ds.type
+        }
+      })
+    })
+    db.games = games
     await this.save()
   }
 }
 
 BaseModel.initDB(UserDB, COLUMNS)
-await UserDB.sync({ alter: true })
+await UserDB.sync()
 
 export default UserDB
