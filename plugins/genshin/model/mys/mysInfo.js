@@ -4,6 +4,9 @@ import lodash from 'lodash'
 import NoteUser from './NoteUser.js'
 import MysUser from './MysUser.js'
 import DailyCache from './DailyCache.js'
+import fetch from "node-fetch"
+import cfg from "../../../../lib/config/config.js"
+import md5 from "md5"
 
 export default class MysInfo {
   static tips = '请先#绑定cookie\n发送【体力帮助】查看配置教程'
@@ -177,15 +180,42 @@ export default class MysInfo {
       }
 
       for (let i in res) {
-        res[i] = await mysInfo.checkCode(res[i], res[i].api, mysApi)
-
+        res[i] = await mysInfo.checkCode(res[i], res[i].api)
+        if (res[i]?.retcode === 1034) {
+          let success = false
+          let {url, challenge, gt} = await mysApi.fetchVerify()
+          let {message_id} = await mysInfo.e.reply(`请点击${url}完成验证`, true)
+          let v = await validate(challenge, gt)
+          if (typeof v !== "string") {
+            let res_info = await mysApi.mysVerifyData(v)
+            if (!res_info||res_info.retcode!==0) {
+              mysInfo.e.reply("验证失败", true)
+            }else success = true
+          }else mysInfo.e.reply(v, true)
+          await Bot.deleteMsg(message_id)
+          if(success) return await MysInfo.get(e, api, data, option)
+        }
         if (res[i]?.retcode === 0) continue
 
         break
       }
     } else {
       res = await mysApi.getData(api, data)
-      res = await mysInfo.checkCode(res, api, mysApi)
+      res = await mysInfo.checkCode(res, api)
+      if (res?.retcode === 1034) {
+        let success = false
+        let {url, challenge, gt} = await mysApi.fetchVerify()
+        let {message_id} = await mysInfo.e.reply(`请点击${url}完成验证`, true)
+        let v = await validate(challenge, gt)
+        if (typeof v !== "string") {
+          let res_info = await mysApi.mysVerifyData(v)
+          if (!res_info||res_info.retcode!==0) {
+            mysInfo.e.reply("验证失败", true)
+          }else success = true
+        }else mysInfo.e.reply(v, true)
+        await Bot.deleteMsg(message_id)
+        if(success) return await MysInfo.get(e, api, data, option)
+      }
     }
 
     return res
@@ -389,7 +419,6 @@ export default class MysInfo {
         break
       case 1034:
         logger.mark(`[米游社查询失败][uid:${this.uid}][qq:${this.userId}] 遇到验证码`)
-        this.e.reply('米游社查询遇到验证码，请稍后再试')
         break
       default:
         this.e.reply(`米游社接口报错，暂时无法查询：${res.message || 'error'}`)
@@ -418,4 +447,28 @@ export default class MysInfo {
     /** 统计次数设为超限 */
     await this.ckUser.disable(game)
   }
+}
+
+async function validate(c, g){
+  let key = md5(`challenge=${c}&gt=${g}`)
+  return new Promise(resolve =>  {
+    let timer = setTimeout(()=>{
+      clearInterval(interval)
+      resolve("验证超时")
+    },120000)
+    let interval = setInterval(async ()=> {
+      let res = await fetch(`${cfg.bot.verifyHost}/result/get?key=${key}`, {
+        method: 'get'
+      })
+      if (!res.ok) {
+        return
+      }
+      res = await res.json()
+      if (res.code===0) {
+        clearTimeout(timer)
+        clearInterval(interval)
+        resolve(res.data)
+      }
+    },2000)
+  })
 }
