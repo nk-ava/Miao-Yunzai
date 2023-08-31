@@ -14,14 +14,14 @@
     "start": "pm2 start ./config/pm2/pm2.json",
     "stop": "pm2 stop ./config/pm2/pm2.json",
     "restart": "pm2 restart ./config/pm2/pm2.json",
-    "log": "pm2 logs --lines 400 Miao-Yunzai"
+    "log": "node ./lib/tools/name.js"
   },
   "dependencies": {
     "art-template": "^4.13.2",
     "chalk": "^5.2.0",
     "chokidar": "^3.5.3",
     "https-proxy-agent": "5.0.1",
-    "icqq": "^0.4.13",
+    "icqq": "^0.5.0",
     "image-size": "^1.0.2",
     "inquirer": "^8.2.5",
     "lodash": "^4.17.21",
