@@ -1,6 +1,7 @@
 import md5 from 'md5'
 import fetch from 'node-fetch'
 import cfg from '../../../../lib/config/config.js'
+import querystring from "querystring"
 import apiTool from './apiTool.js'
 
 let HttpsProxyAgent = ''
@@ -163,6 +164,7 @@ export default class MysApi {
     return {
       'x-rpc-app_version': client.app_version,
       'x-rpc-client_type': client.client_type,
+      'x-rpc-device_fp': '38d7edaad494f',
       'User-Agent': client.User_Agent,
       Referer: client.Referer,
       DS: this.getDs(query, body)
@@ -228,5 +230,42 @@ export default class MysApi {
       result += characters[Math.floor(Math.random() * characters.length)]
     }
     return result
+  }
+
+  async fetchVerify() {
+    let res = await fetch("https://api-takumi-record.mihoyo.com/game_record/app/card/wapi/createVerification?is_high=true",{
+      method: 'get',
+      headers: {
+        ...this.getHeaders("is_high=true",""),
+        Cookie: this.cookie
+      }
+    })
+    if(!res.ok){
+      return false
+    }
+    res = (await res.json()).data
+    let query = querystring.stringify(res)
+    return {
+      url:`${cfg.bot.verifyHost}/verification?${query}`,
+      challenge: res.challenge,
+      gt: res.gt
+    }
+  }
+
+  async mysVerifyData(v){
+    let vd = JSON.stringify(v)
+    let res = await fetch("https://api-takumi-record.mihoyo.com/game_record/app/card/wapi/verifyVerification",{
+      method: 'post',
+      headers: {
+        ...this.getHeaders("",vd),
+        Cookie: this.cookie
+      },
+      body: vd
+    })
+    if(!res.ok){
+      return false
+    }
+    res = await res.json()
+    return res
   }
 }
