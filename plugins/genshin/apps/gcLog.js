@@ -1,5 +1,4 @@
 import plugin from '../../../lib/plugins/plugin.js'
-import puppeteer from '../../../lib/puppeteer/puppeteer.js'
 import fs from 'node:fs'
 import GachaLog from '../model/gachaLog.js'
 import ExportLog from '../model/exportLog.js'
@@ -20,23 +19,23 @@ export class gcLog extends plugin {
           fnc: 'logUrl'
         },
         {
-          reg: '#txt日志文件导入记录',
+          reg: '^#txt日志文件导入记录$',
           fnc: 'logFile'
         },
         {
-          reg: '#xlsx文件导入记录',
+          reg: '^#xlsx文件导入记录$',
           fnc: 'logXlsx'
         },
         {
-          reg: '#json文件导入记录',
+          reg: '^#json文件导入记录$',
           fnc: 'logJson'
         },
         {
-          reg: '^#*(原神|星铁)?(全部)?(抽卡|抽奖|角色|武器|常驻|up|新手|光锥)池*(记录|祈愿|分析)$',
+          reg: '^#*(原神|星铁)?(全部)?(抽卡|抽奖|角色|武器|常驻|up|新手|光锥|全部)池*(记录|祈愿|分析)$',
           fnc: 'getLog'
         },
         {
-          reg: '^#*导出记录(excel|xlsx|json)*$',
+          reg: '^#*(原神|星铁)?导出记录(excel|xlsx|json)*$',
           fnc: 'exportLog'
         },
         {
@@ -54,11 +53,11 @@ export class gcLog extends plugin {
       ]
     })
 
-    this.androidUrl = 'docs.qq.com/doc/DUWpYaXlvSklmVXlX'
+    this.androidUrl = 'https://docs.qq.com/doc/DUWpYaXlvSklmVXlX'
   }
 
   async init () {
-    let file = ['./data/gachaJson', './data/srJson', './temp/html/StarRail']
+    let file = ['./data/gachaJson', './data/srJson', './temp/html/StarRail', './temp/uigf']
     for (let i of file) {
       if (!fs.existsSync(i)) {
         fs.mkdirSync(i)
@@ -98,8 +97,7 @@ export class gcLog extends plugin {
     let data = await new GachaLog(this.e).logUrl()
     if (!data) return
 
-    let img = await puppeteer.screenshot(`${data.srtempFile}gachaLog`, data)
-    if (img) await this.reply(img)
+    await this.renderImg('genshin', `html/gacha/gacha-log`, data)
   }
 
   /** 发送output_log.txt日志文件 */
@@ -121,8 +119,7 @@ export class gcLog extends plugin {
 
     if (typeof data != 'object') return
 
-    let img = await puppeteer.screenshot(`${data.srtempFile}gachaLog`, data)
-    if (img) await this.reply(img)
+    await this.renderImg('genshin', `html/gacha/gacha-log`, data)
   }
 
   /** #抽卡记录 */
@@ -130,12 +127,11 @@ export class gcLog extends plugin {
     this.e.isAll = !!(this.e.msg.includes('全部'))
     let data = await new GachaLog(this.e).getLogData()
     if (!data) return
-    let name = `${data.srtempFile}gachaLog`
+    let name = `html/gacha/gacha-log`
     if (this.e.isAll) {
-      name = `${data.srtempFile}gachaAllLog`
+      name = `html/gacha/gacha-all-log`
     }
-    let img = await puppeteer.screenshot(name, data)
-    if (img) await this.reply(img)
+    await this.renderImg('genshin', name, data)
   }
 
   /** 导出记录 */
@@ -145,17 +141,12 @@ export class gcLog extends plugin {
       return
     }
 
-    let friend = Bot.fl.get(Number(this.e.user_id))
-    if (!friend) {
-      await this.reply('无法发送文件，请先添加好友')
-      return
-    }
-
     let exportLog = new ExportLog(this.e)
 
     if (this.e.msg.includes('json')) {
       return await exportLog.exportJson()
     } else {
+      await this.e.reply('如需要将此记录导入到其他平台，请导出json格式文件')
       return await exportLog.exportXlsx()
     }
   }
@@ -170,7 +161,7 @@ export class gcLog extends plugin {
       await this.e.reply('请发送xlsx文件')
       return true
     }
-
+    await this.e.reply('如果是星铁记录，请在【原始数据】工作表复制【gacha_type】列，粘贴并把此标题重命名为【srgf_gacha_type】，否则可能无法正确识别')
     await new ExportLog(this.e).logXlsx()
   }
 
@@ -189,25 +180,24 @@ export class gcLog extends plugin {
   }
 
   async help () {
-    await this.e.reply(segment.image(`file:///${_path}/resources/logHelp/记录帮助.png`))
+    await this.e.reply(segment.image(`file://${_path}/resources/logHelp/记录帮助.png`))
   }
 
   async helpPort () {
     let msg = this.e.msg.replace(/#|帮助/g, '')
 
     if (['电脑', 'pc'].includes(msg)) {
-      await this.e.reply(segment.image(`file:///${_path}/resources/logHelp/记录帮助-电脑.png`))
+      await this.e.reply(segment.image(`file://${_path}/resources/logHelp/记录帮助-电脑.png`))
     } else if (['安卓'].includes(msg)) {
       await this.e.reply(`安卓抽卡记录获取教程：${this.androidUrl}`)
     } else if (['苹果', 'ios'].includes(msg)) {
-      await this.e.reply(segment.image(`file:///${_path}/resources/logHelp/记录帮助-苹果.png`))
+      await this.e.reply(segment.image(`file://${_path}/resources/logHelp/记录帮助-苹果.png`))
     }
   }
 
   async logCount () {
     let data = await new LogCount(this.e).count()
     if (!data) return
-    let img = await puppeteer.screenshot(`${data.srtempFile}logCount`, data)
-    if (img) await this.reply(img)
+    this.renderImg('genshin', `html/gacha/log-count`, data)
   }
 }

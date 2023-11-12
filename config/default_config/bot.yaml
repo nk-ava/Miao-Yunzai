@@ -6,16 +6,18 @@ ignore_self: true
 # 被风控时是否尝试用分片发送
 resend: false
 # ffmpeg
-ffmpeg_path: 
-ffprobe_path: 
+ffmpeg_path:
+ffprobe_path:
 
 # chromium其他路径
-chromium_path: 
+chromium_path:
 # puppeteer接口地址
-puppeteer_ws: 
-  
+puppeteer_ws:
+# puppeteer截图超时时间
+puppeteer_timeout:
+
 # 米游社接口代理地址，国际服用
-proxyAddress: 
+proxyAddress:
 
 # 上线时给首个主人QQ推送帮助
 online_msg: true

@@ -64,7 +64,7 @@ export default class User extends base {
     }
 
     // TODO：独立的mys数据，不走缓存ltuid
-    let mys = await MysUser.create(param.ltuid || param.ltuid_v2 || param.ltmid_v2)
+    let mys = await MysUser.create(param.ltuid || param.ltuid_v2 || param.account_id_v2 || param.ltmid_v2)
     if (!mys) {
       await this.e.reply('发送cookie不完整或数据错误')
       return
@@ -82,7 +82,7 @@ export default class User extends base {
       data.ck += ` mi18nLang=${param.mi18nLang};`
     }
     /** 拼接ck */
-    data.ltuid = param.ltuid || param.ltmid_v2
+    data.ltuid = param.ltuid || param.ltuid_v2 || param.account_id_v2 || param.ltmid_v2
 
     /** 米游币签到字段 */
     data.login_ticket = param.login_ticket ?? ''
@@ -98,7 +98,8 @@ export default class User extends base {
       return await this.e.reply(`绑定cookie失败：${this.checkMsg || 'cookie错误'}`)
     }
 
-    if (flagV2) {
+    // 判断data.ltuid是否是数字
+    if (flagV2 && isNaN(data.ltuid)) {
       // 获取米游社通行证id
       let userFullInfo = await mys.getUserFullInfo()
       if (userFullInfo?.data?.user_info) {
@@ -119,7 +120,7 @@ export default class User extends base {
 
     logger.mark(`${this.e.logFnc} 保存cookie成功 [ltuid:${mys.ltuid}]`)
 
-    let uidMsg = [`绑定cookie成功`, mys.getUidInfo()]
+    let uidMsg = ['绑定cookie成功', mys.getUidInfo()]
     await this.e.reply(uidMsg.join('\n'))
     let msg = []
     if (mys.hasGame('gs')) {
@@ -159,7 +160,7 @@ export default class User extends base {
     if (!mys) {
       return `删除失败：当前的UID${uidData?.uid}无CK信息`
     }
-    let msg = [`绑定cookie已删除`, mys.getUidInfo()]
+    let msg = ['绑定cookie已删除', mys.getUidInfo()]
     await user.delMysUser(uidData.ltuid)
     return msg.join('\n')
   }
@@ -344,7 +345,7 @@ export default class User extends base {
 
   async loadOldUid () {
     // 从DB中导入
-    await sequelize.query(`delete from UserGames where userId is null or data is null`, {})
+    await sequelize.query('delete from UserGames where userId is null or data is null', {})
     let games = await UserGameDB.findAll()
     let count = 0
     await Data.forEach(games, async (game) => {
@@ -380,7 +381,7 @@ export default class User extends base {
       }
       redis.del(key)
     }
-    await sequelize.query(`delete from Users where (ltuids is null or ltuids='') and games is null`, {})
+    await sequelize.query('delete from Users where (ltuids is null or ltuids=\'\') and games is null', {})
     console.log('load Uid Data Done...')
   }
 
@@ -496,6 +497,102 @@ export default class User extends base {
       ...stat,
       _plugin: 'genshin',
       ...this.screenData
+    }
+  }
+
+  async bindNoteUser () {
+    let user = await this.user()
+    let id = user.qq
+    let { e } = this
+    let { msg, mainUserId, originalUserId } = e
+    if (!id) {
+      return true
+    }
+    if (/(删除绑定|取消绑定|解除绑定|解绑|删除|取消)/.test(msg)) {
+      // 删除用户
+      id = originalUserId || id
+      if (/主/.test(msg)) {
+        let mainId = await redis.get(`Yz:NoteUser:mainId:${id}`)
+        if (!mainId) {
+          e.reply('当前用户没有主用户，在主用户中通过【#绑定用户】可进行绑定...')
+          return true
+        }
+        let subIds = await Data.getCacheJSON(`Yz:NoteUser:subIds:${mainId}`)
+        delete subIds[id]
+        await redis.del(`Yz:NoteUser:mainId:${id}`)
+        await Data.setCacheJSON(`Yz:NoteUser:subIds:${mainId}`, subIds)
+        e.reply('已经解除与主用户的绑定...')
+      } else if (/子/.test(msg)) {
+        let subIds = await Data.getCacheJSON(`Yz:NoteUser:subIds:${id}`)
+        let count = 0
+        for (let key in subIds) {
+          await redis.del(`Yz:NoteUser:mainId:${key}`)
+          count++
+        }
+        if (count > 0) {
+          e.reply(`已删除${count}个子用户...`)
+          await redis.del(`Yz:NoteUser:subIds:${id}`)
+        } else {
+          e.reply(`当前用户没有子用户，通过【#绑定用户】可绑定子用户...`)
+        }
+      }
+      return true
+    }
+    msg = msg.replace(/^#\s*(接受)?绑定(主|子)?(用户|账户|账号)/, '')
+    let idRet = /^\[(\w{5,})](?:\[(\w+)])?$/.exec(msg)
+    if (idRet && idRet[1]) {
+      let mainId = idRet[1]
+      let currId = id.toString()
+      if (!idRet[2]) {
+        // 子用户绑定
+        if (currId === mainId) {
+          if (originalUserId && originalUserId !== mainId && mainUserId === mainId) {
+            e.reply('当前账户已完成绑定...')
+          } else {
+            e.reply('请切换到需要绑定的子用户并发送绑定命令...')
+          }
+          return true
+        }
+        let verify = (Math.floor(100000000 + Math.random() * 100000000)).toString()
+        await redis.set(`Yz:NoteUser:verify:${mainId}`, verify + '||' + currId, { EX: 300 })
+        e.reply([`此账号将作为子用户，绑定至主用户:${mainId}`,
+          '成功绑定后，此用户输入的命令，将视作主用户命令，使用主用户的CK与UID等信息',
+          '如需继续绑定，请在5分钟内，使用主账户发送以下命令：', '',
+          `#接受绑定子用户[${mainId}][${verify}]`
+        ].join('\n'))
+        return true
+      } else {
+        // 接受绑定
+        if (currId !== mainId) {
+          e.reply('请切换到主用户并发送接受绑定的命令...')
+          return true
+        }
+        let verify = await redis.get(`Yz:NoteUser:verify:${mainId}`) || ''
+        verify = verify.split('||')
+        if (!verify || verify[0] !== idRet[2] || !verify[1]) {
+          e.reply('校验失败，请发送【#绑定用户】重新开始绑定流程')
+          await redis.del(`Yz:NoteUser:verify:${mainId}`)
+          return true
+        }
+        let subId = verify[1]
+        await redis.del(`Yz:NoteUser:verify:${mainId}`)
+        await redis.set(`Yz:NoteUser:mainId:${subId}`, mainId, { EX: 3600 * 24 * 365 })
+        let subIds = await Data.getCacheJSON(`Yz:NoteUser:subIds:${mainId}`)
+        subIds[subId] = 'true'
+        await Data.setCacheJSON(`Yz:NoteUser:subIds:${mainId}`, subIds)
+        e.reply('绑定成功，绑定的子用户可使用主用户的UID/CK等信息\n请勿接受不是自己用户的绑定，如需解绑可通过【#解绑子用户】进行解绑')
+        return true
+      }
+    } else {
+      if (mainUserId && originalUserId && originalUserId !== mainUserId) {
+        e.reply('当前账户已有绑定的主账户，请使用主账户发起绑定...')
+        return true
+      }
+      e.reply(['将此账号作为【主用户】，绑定其他子用户。', '',
+        '可在多个QQ或频道间打通用户信息，子用户会使用主用户的CK与UID等信息',
+        '注意：请勿接受不是自己用户的绑定！',
+        '请【切换至需要绑定的子用户】并发送以下命令，获得验证命令...', '',
+        `#绑定主用户[${id}]`].join('\n'))
     }
   }
 }

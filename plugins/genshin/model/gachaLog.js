@@ -4,34 +4,50 @@ import lodash from 'lodash'
 import fs from 'node:fs'
 import common from '../../../lib/common/common.js'
 import gsCfg from './gsCfg.js'
+import GachaData from './gachaData.js'
+import { Character, Weapon } from '../../miao-plugin/models/index.js'
 
 export default class GachaLog extends base {
   constructor (e) {
     super(e)
     this.model = 'gachaLog'
 
+    if (!e.isSr && e.msg) e.isSr = /\/(common|hkrpg)\//.test(e.msg)
+
     this.urlKey = `${this.prefix}url:`
     /** 绑定的uid */
-    this.uidKey = `Yz:genshin:mys:qq-uid:${this.userId}`
+    this.uidKey = this.e.isSr ? `Yz:srJson:mys:qq-uid:${this.userId}` : `Yz:genshin:mys:qq-uid:${this.userId}`
+    this.path = this.e.isSr ? `./data/srJson/${this.e.user_id}/` : `./data/gachaJson/${this.e.user_id}/`
 
-    this.path = `./data/gachaJson/${this.e.user_id}/`
-
-    this.pool = [
+    const gsPool = [
       { type: 301, typeName: '角色' },
       { type: 302, typeName: '武器' },
       { type: 200, typeName: '常驻' }
     ]
-    if (e.isSr) {
-      /** 绑定的uid */
-      this.uidKey = `Yz:srJson:mys:qq-uid:${this.userId}`
 
-      this.path = `./data/srJson/${this.e.user_id}/`
-      this.pool = [
-        { type: 11, typeName: '角色' },
-        { type: 12, typeName: '光锥' },
-        { type: 1, typeName: '常驻' },
-        { type: 2, typeName: '新手' }
-      ]
+    const srPool = [
+      { type: 11, typeName: '角色' },
+      { type: 12, typeName: '光锥' },
+      { type: 1, typeName: '常驻' },
+      { type: 2, typeName: '新手' }
+    ]
+
+    this.pool = e.isSr ? srPool : gsPool
+  }
+
+  static getIcon (name, type = 'role', game = '') {
+    if (type === 'role' || type === '角色') {
+      let char = Character.get(name, game)
+      if (!char) {
+        console.log('not-found-char', name, game)
+      }
+      return char?.imgs?.face || ''
+    } else if (type === 'weapon' || type === '武器' || type === '光锥') {
+      let weapon = Weapon.get(name, game)
+      if (!weapon) {
+        console.log('not-found-weapon',`[${name}]`, game)
+      }
+      return weapon?.imgs?.icon || ''
     }
   }
 
@@ -60,7 +76,7 @@ export default class GachaLog extends base {
       if (i <= 1) await common.sleep(500)
     }
     MakeMsg.push(tmpMsg)
-    MakeMsg.push(`\n抽卡记录更新完成，您还可回复\n【${this?.e?.isSr ? '*' : '#'}全部抽卡记录】展示全部抽卡数据\n【${this?.e?.isSr ? '*光锥' : '#武器'}记录】统计${this?.e?.isSr ? '星铁光锥' : '武器'}池数据\n【${this?.e?.isSr ? '*' : '#'}角色统计】按卡池统计数据\n【#导出记录】导出记录数据`)
+    MakeMsg.push(`\n抽卡记录更新完成，您还可回复\n【${this?.e?.isSr ? '*' : '#'}全部记录】统计全部抽卡数据\n【${this?.e?.isSr ? '*光锥' : '#武器'}记录】统计${this?.e?.isSr ? '星铁光锥' : '武器'}池数据\n【${this?.e?.isSr ? '*' : '#'}角色统计】按卡池统计数据\n【${this?.e?.isSr ? '*' : '#'}导出记录】导出记录数据`)
     await this.e.reply(MakeMsg)
 
     this.isLogUrl = true
@@ -90,6 +106,7 @@ export default class GachaLog extends base {
     // timestamp=1641338980〈=zh-cn 修复链接有奇怪符号
     url = url.replace(/〈=/g, '&')
     if (url.includes('getGachaLog?')) url = url.split('getGachaLog?')[1]
+    if (url.includes('index.html?')) url = url.split('index.html?')[1]
 
     // 处理参数
     let arr = new URLSearchParams(url).entries()
@@ -130,7 +147,8 @@ export default class GachaLog extends base {
     let url = txt.match(/auth_appid=webview_gacha(.*)hk4e_cn/)
 
     /** 删除文件 */
-    fs.unlink(textPath, () => { })
+    fs.unlink(textPath, () => {
+    })
 
     if (!url || !url[0]) {
       return false
@@ -141,8 +159,25 @@ export default class GachaLog extends base {
 
   async checkUrl (param) {
     if (!param.region) {
-      this.e.reply('链接参数错误：缺少region\n请复制完整链接')
-      return false
+      let res = await this.logApi({
+        size: 6,
+        authkey: param.authkey,
+        region: this.e.isSr ? 'prod_gf_cn' : 'cn_gf01'
+      })
+      if (!res?.data?.region) {
+        res = await this.logApi({
+          size: 6,
+          authkey: param.authkey,
+          region: this.e.isSr ? 'prod_official_usa' : 'os_usa'
+        })
+      }
+
+      if (res?.data?.region) {
+        param.region = res?.data?.region
+      } else {
+        await this.e.reply('链接复制错误或已失效')
+        return false
+      }
     }
 
     let res = await this.logApi({
@@ -286,6 +321,9 @@ export default class GachaLog extends base {
       region: this.getServer()
     })
 
+    /** 延迟下防止武器记录获取失败 */
+    await common.sleep(1000)
+
     if (res.retcode != 0) {
       return { hasErr: true, list: [] }
     }
@@ -322,7 +360,8 @@ export default class GachaLog extends base {
 
   // 读取本地json
   readJson () {
-    let logJson = []; let ids = new Map()
+    let logJson = []
+    let ids = new Map()
     let file = `${this.path}/${this.uid}/${this.type}.json`
     if (fs.existsSync(file)) {
       // 获取本地数据 进行数据合并
@@ -390,7 +429,7 @@ export default class GachaLog extends base {
       logData.push(data)
     }
     if (logData.length === 0) {
-      this.e.reply('暂无抽卡记录\n#记录帮助，查看配置说明', false, { at: true })
+      this.e.reply(`暂无抽卡记录\n${this.e?.isSr ? '*' : '#'}记录帮助，查看配置说明`, false, { at: true })
       return true
     }
     for (let i of logData) {
@@ -409,11 +448,13 @@ export default class GachaLog extends base {
 
   async getGcLogData () {
     /** 卡池 */
-    this.getPool()
+    const { type, typeName } = this.getPool()
     /** 更新记录 */
     if (!this.isLogUrl) await this.updateLog()
     /** 统计计算记录 */
     let data = this.analyse()
+    data.type = type
+    data.typeName = typeName
     /** 渲染数据 */
     data = this.randData(data)
     return data
@@ -421,50 +462,54 @@ export default class GachaLog extends base {
 
   getPool () {
     let msg = this.e.msg.replace(/#|抽卡|记录|祈愿|分析|池|原神|星铁|崩坏星穹铁道|铁道/g, '')
-    this.type = this.e.isSr ? 11 : 301
-    this.typeName = '角色'
+    let type = this.e.isSr ? 11 : 301
+    let typeName = '角色'
     switch (msg) {
       case 'up':
       case '抽卡':
       case '角色':
       case '抽奖':
-        this.type = this.e.isSr ? 11 : 301
-        this.typeName = '角色'
+        type = this.e.isSr ? 11 : 301
+        typeName = '角色'
         break
       case '常驻':
-        this.type = this.e.isSr ? 1 : 200
-        this.typeName = '常驻'
+        type = this.e.isSr ? 1 : 200
+        typeName = '常驻'
         break
       case '武器':
-        this.type = this.e.isSr ? 12 : 302
-        this.typeName = this.e.isSr ? '光锥' : '武器'
+        type = this.e.isSr ? 12 : 302
+        typeName = this.e.isSr ? '光锥' : '武器'
         break
       case '光锥':
-        this.type = 12
-        this.typeName = '光锥'
+        type = 12
+        typeName = '光锥'
         break
       case '新手':
-        this.type = this.e.isSr ? 2 : 100
-        this.typeName = '新手'
+        type = this.e.isSr ? 2 : 100
+        typeName = '新手'
         break
     }
+    this.type = type
+    this.typeName = typeName
+    return { type, typeName }
   }
 
   async getUid () {
     if (!fs.existsSync(this.path)) {
-      this.e.reply('暂无抽卡记录\n#记录帮助，查看配置说明', false, { at: true })
+      this.e.reply(`暂无抽卡记录\n${this.e?.isSr ? '*' : '#'}记录帮助，查看配置说明`, false, { at: true })
       return false
     }
 
     let logs = fs.readdirSync(this.path)
 
     if (lodash.isEmpty(logs)) {
-      this.e.reply('暂无抽卡记录\n#记录帮助，查看配置说明', false, { at: true })
+      this.e.reply(`暂无抽卡记录\n${this.e?.isSr ? '*' : '#'}记录帮助，查看配置说明`, false, { at: true })
       return false
     }
-    this.uid = this?.e?.isSr ? this.e.user?._games?.sr?.uid : this.e.user?._games?.gs?.uid
+
     if (!this.uid) {
-      this.uid = await redis.get(this.uidKey)
+      this.e.at = false
+      this.uid = this?.e?.isSr ? this.e.user?._games?.sr?.uid : this.e.user?._games?.gs?.uid || await this.e.runtime.getUid(this.e) || await redis.get(this.uidKey)
     }
 
     /** 记录有绑定的uid */
@@ -517,6 +562,7 @@ export default class GachaLog extends base {
     let weaponFourNum = 0
     let allNum = this.all.length
     let bigNum = 0
+    let game = this.e?.game
 
     for (let val of this.all) {
       this.role = val
@@ -559,6 +605,7 @@ export default class GachaLog extends base {
 
         fiveLog.push({
           name: val.name,
+          icon: GachaLog.getIcon(val.name, val.item_type, game),
           abbrName: gsCfg.shortName(val.name),
           item_type: val.item_type,
           num: 0,
@@ -600,7 +647,9 @@ export default class GachaLog extends base {
         num: fourLog[i]
       })
     }
-    four = four.sort((a, b) => { return b.num - a.num })
+    four = four.sort((a, b) => {
+      return b.num - a.num
+    })
 
     if (four.length <= 0) {
       four.push({ name: '无', num: 0 })
@@ -697,9 +746,12 @@ export default class GachaLog extends base {
 
   /** 渲染数据 */
   randData (data) {
+    const type = data.type || this.type
+    const typeName = data.typeName || this.typeName
+    const max = type === 12 || type === 302 ? 80 : 90
     let line = []
     let weapon = this.e.isSr ? '光锥' : '武器'
-    if ([301, 11].includes(this.type)) {
+    if ([301, 11].includes(type)) {
       line = [[
         { lable: '未出五星', num: data.noFiveNum, unit: '抽' },
         { lable: '五星', num: data.fiveNum, unit: '个' },
@@ -713,7 +765,7 @@ export default class GachaLog extends base {
       ]]
     }
     // 常驻池
-    if ([200, 1].includes(this.type)) {
+    if ([200, 1].includes(type)) {
       line = [[
         { lable: '未出五星', num: data.noFiveNum, unit: '抽' },
         { lable: '五星', num: data.fiveNum, unit: '个' },
@@ -727,7 +779,7 @@ export default class GachaLog extends base {
       ]]
     }
     // 武器池
-    if ([302, 12].includes(this.type)) {
+    if ([302, 12].includes(type)) {
       line = [[
         { lable: '未出五星', num: data.noFiveNum, unit: '抽' },
         { lable: '五星', num: data.fiveNum, unit: '个' },
@@ -741,7 +793,7 @@ export default class GachaLog extends base {
       ]]
     }
     // 新手池
-    if ([100, 2].includes(this.type)) {
+    if ([100, 2].includes(type)) {
       line = [[
         { lable: '未出五星', num: data.noFiveNum, unit: '抽' },
         { lable: '五星', num: data.fiveNum, unit: '个' },
@@ -755,23 +807,24 @@ export default class GachaLog extends base {
       ]]
     }
     let hasMore = false
-    if (this.e.isGroup && data.fiveLog.length > 48) {
-      data.fiveLog = data.fiveLog.slice(0, 48)
-      hasMore = true
-    }
+    // if (this.e.isGroup && data.fiveLog.length > 48) {
+    //   data.fiveLog = data.fiveLog.slice(0, 48)
+    //   hasMore = true
+    // }
 
     return {
       ...this.screenData,
       saveId: this.uid,
       uid: this.uid,
-      type: this.type,
-      typeName: this.typeName,
+      type,
+      typeName,
       allNum: data.allNum,
       firstTime: data.firstTime,
       lastTime: data.lastTime,
       fiveLog: data.fiveLog,
       line,
-      hasMore
+      hasMore,
+      max
     }
   }
 
